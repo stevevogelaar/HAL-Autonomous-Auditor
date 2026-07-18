@@ -4,6 +4,7 @@ An autonomous security auditing agent that plans, executes, and reports.
 Built from HAL Guardian's local-AI orchestrator.
 """
 import json
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,10 +13,9 @@ from typing import Any, Dict, List
 import ollama
 
 # Reuse HAL Guardian modules
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hal_guardian.config import DEFAULT_MODEL, OLLAMA_HOST
+from hal_guardian.config import DEFAULT_MODEL, OLLAMA_HOST, get_available_models
 from hal_guardian.orchestrator import run
 from hal_guardian.models import Finding
 
@@ -145,14 +145,42 @@ def autonomous_audit(directory: str, project_name: str = "", model: str = DEFAUL
     }
 
 
+def _pick_model(requested: str) -> str:
+    """Resolve requested model against locally pulled models."""
+    available = get_available_models()
+    if requested in available:
+        return requested
+    if DEFAULT_MODEL in available:
+        return DEFAULT_MODEL
+    if available:
+        return available[0]
+    return requested
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="HAL Autonomous Auditor")
-    parser.add_argument("directory", help="Directory to audit")
+    parser.add_argument("directory", nargs="?", default="", help="Directory to audit")
     parser.add_argument("--name", default="", help="Project name")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Ollama model")
+    parser.add_argument("--list-models", action="store_true", help="List locally available Ollama models")
     parser.add_argument("--deep-scan", action="store_true", help="Run Trust Shield deep scan on high-risk findings")
     args = parser.parse_args()
 
-    result = autonomous_audit(args.directory, project_name=args.name, model=args.model, deep_scan_text=args.deep_scan)
+    if args.list_models:
+        print("Available local models:")
+        for m in get_available_models():
+            marker = " (default)" if m == DEFAULT_MODEL else ""
+            print(f"  - {m}{marker}")
+        sys.exit(0)
+
+    if not args.directory:
+        parser.print_help()
+        sys.exit(1)
+
+    selected_model = _pick_model(args.model)
+    if selected_model != args.model:
+        print(f"Requested model '{args.model}' not found. Using '{selected_model}'.")
+
+    result = autonomous_audit(args.directory, project_name=args.name, model=selected_model, deep_scan_text=args.deep_scan)
     print(json.dumps(result, indent=2, default=str))
